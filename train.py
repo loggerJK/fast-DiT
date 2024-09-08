@@ -153,6 +153,7 @@ def main(args):
         experiment_dir = f"{args.results_dir}/{model_string_name}_register{args.register}"
         if args.lsun: experiment_dir += "_lsun"
         # Stores saved model checkpoints
+        if args.test : experiment_dir = f"{args.results_dir}/test"
         checkpoint_dir = f"{experiment_dir}/checkpoints"
         if args.load_checkpoint:
             # Find the latest checkpoint in the checkpoint directory:
@@ -316,5 +317,6 @@ if __name__ == "__main__":
     parser.add_argument("--register", type=int, default=0)
     parser.add_argument("--load-checkpoint", action="store_true", help="Load the latest checkpoint in the checkpoint directory")
     parser.add_argument("--lsun", action="store_true")
+    parser.add_argument("--test", action="store_true")
     args = parser.parse_args()
     main(args)

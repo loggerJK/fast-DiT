@@ -16,9 +16,34 @@ from diffusers.models import AutoencoderKL
 from download import find_model
 from models import DiT_models
 import argparse
+import os
+import numpy as np
+import warnings
 
+
+def enable_full_determinism():
+    """
+    Helper function for reproducible behavior during distributed training. See
+    - https://pytorch.org/docs/stable/notes/randomness.html for pytorch
+    """
+    #  Enable PyTorch deterministic mode. This potentially requires either the environment
+    #  variable 'CUDA_LAUNCH_BLOCKING' or 'CUBLAS_WORKSPACE_CONFIG' to be set,
+    # depending on the CUDA version, so we set them both here
+    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"
+    torch.use_deterministic_algorithms(True)
+
+    # Enable CUDNN deterministic mode
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cuda.matmul.allow_tf32 = False
+
+    # Numpy
+    np.random.seed(0)
 
 def main(args):
+    enable_full_determinism()
+    using_cfg = args.cfg_scale > 1.0
     # Setup PyTorch:
     torch.manual_seed(args.seed)
     torch.set_grad_enabled(False)
@@ -33,7 +58,9 @@ def main(args):
     latent_size = args.image_size // 8
     model = DiT_models[args.model](
         input_size=latent_size,
-        num_classes=args.num_classes
+        num_classes=args.num_classes,
+        register=args.register,
+        save_attn=args.save_attn
     ).to(device)
     # Auto-download a pre-trained model or load a custom DiT checkpoint from train.py:
     ckpt_path = args.ckpt or f"DiT-XL-2-{args.image_size}x{args.image_size}.pt"
@@ -44,7 +71,14 @@ def main(args):
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
 
     # Labels to condition the model with (feel free to change):
-    class_labels = [207, 360, 387, 974, 88, 979, 417, 279]
+    if args.lsun:
+        class_labels = [0]
+        if args.num_classes != 1:
+            warnings.warn("LSUN only has one class, setting num_classes to 1.")
+            args.num_classes = 1
+    else :
+        class_labels = [207]
+        # class_labels = [207, 360, 387, 974, 88, 979, 417, 279]
 
     # Create sampling noise:
     n = len(class_labels)
@@ -52,20 +86,29 @@ def main(args):
     y = torch.tensor(class_labels, device=device)
 
     # Setup classifier-free guidance:
-    z = torch.cat([z, z], 0)
-    y_null = torch.tensor([1000] * n, device=device)
-    y = torch.cat([y, y_null], 0)
-    model_kwargs = dict(y=y, cfg_scale=args.cfg_scale)
+    if using_cfg:
+        z = torch.cat([z, z], 0)
+        y_null = torch.tensor([1000] * n, device=device)
+        y = torch.cat([y, y_null], 0)
+        model_kwargs = dict(y=y, cfg_scale=args.cfg_scale)
+        sample_fn = model.forward_with_cfg
+    else:
+        model_kwargs = dict(y=y)
+        sample_fn = model.forward
 
     # Sample images:
     samples = diffusion.p_sample_loop(
-        model.forward_with_cfg, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=True, device=device
+        sample_fn, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=True, device=device
     )
-    samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
+    if using_cfg:
+        samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
     samples = vae.decode(samples / 0.18215).sample
 
     # Save and display images:
-    save_image(samples, "sample.png", nrow=4, normalize=True, value_range=(-1, 1))
+    save_image(samples, "sample.png", nrow=1, normalize=True, value_range=(-1, 1))
+
+    if args.save_attn:
+        torch.save(model.attention_maps_list, "attn_maps.pt")
 
 
 if __name__ == "__main__":
@@ -74,10 +117,13 @@ if __name__ == "__main__":
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="mse")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
-    parser.add_argument("--cfg-scale", type=float, default=4.0)
+    parser.add_argument("--cfg-scale", type=float, default=0.0)
     parser.add_argument("--num-sampling-steps", type=int, default=250)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--ckpt", type=str, default=None,
                         help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
+    parser.add_argument("--register", type=int, default=0)
+    parser.add_argument("--lsun", action="store_true", help="Use LSUN dataset instead of ImageNet.")
+    parser.add_argument("--save_attn", action="store_true", help="Save attention maps.")
     args = parser.parse_args()
     main(args)

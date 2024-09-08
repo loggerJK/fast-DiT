@@ -14,6 +14,7 @@ import torch.nn as nn
 import numpy as np
 import math
 from timm.models.vision_transformer import PatchEmbed, Attention, Mlp
+from custom_attention import SaveAttention
 import einops
 
 
@@ -107,7 +108,7 @@ class DiTBlock(nn.Module):
         super().__init__()
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         # self.attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True, **block_kwargs)
-        self.attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True)
+        self.attn = SaveAttention(hidden_size, num_heads=num_heads, qkv_bias=True)
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
         approx_gelu = lambda: nn.GELU(approximate="tanh")
@@ -169,6 +170,7 @@ class DiT(nn.Module):
         num_classes=1000,
         learn_sigma=True,
         register=0,
+        save_attn=False
     ):
         super().__init__()
         self.learn_sigma = learn_sigma
@@ -185,16 +187,37 @@ class DiT(nn.Module):
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, hidden_size), requires_grad=False)
 
         self.blocks = nn.ModuleList([
-            DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio, register=register) for _ in range(depth)
+            DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio, register=register, save_attn = save_attn) for _ in range(depth)
         ])
         self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
         self.initialize_weights()
 
+        #### Register Token ####
         self.register = register
         T = input_size ** 2 // patch_size ** 2
         if self.register:
             self.register_token = nn.Parameter(
                 torch.zeros(register, hidden_size), requires_grad=True)
+
+        ### Save Attention Weights ###
+        self.save_attn = save_attn
+        self.attention_maps_list = []
+        for block_num, block in enumerate(self.blocks):
+            block.attn.register_forward_hook(self.save_attn_func(block_num))
+
+    def save_attn_func(self, block_num, save_values=False):
+        def _save_attn_func(module, input, output):
+            if self.save_attn:
+                attn_weight = output[-1]
+                attn_weight = (
+                    torch.mean(attn_weight, dim=1)[0].detach().cpu().numpy()
+                )  # Average over heads, torch.Size([1, 12, 4096, 4360])
+                self.attention_maps_list.append((block_num, attn_weight))
+
+            return output[0]
+
+        return _save_attn_func
+
 
     def initialize_weights(self):
         # Initialize transformer layers:

@@ -23,6 +23,7 @@ from PIL import Image
 import numpy as np
 import math
 import argparse
+import warnings
 
 
 def create_npz_from_sample_folder(sample_dir, num=50_000):
@@ -64,6 +65,11 @@ def main(args):
         assert args.image_size in [256, 512]
         assert args.num_classes == 1000
 
+    if args.lsun:
+        if args.num_classes != 1:
+            warnings.warn("LSUN only has one class, setting num_classes to 1.")
+            args.num_classes = 1
+
     # Load model:
     latent_size = args.image_size // 8
     model = DiT_models[args.model](
@@ -86,6 +92,9 @@ def main(args):
     ckpt_string_name = os.path.basename(args.ckpt).replace(".pt", "") if args.ckpt else "pretrained"
     folder_name = f"{model_string_name}-{ckpt_string_name}-size-{args.image_size}-vae-{args.vae}-" \
                   f"cfg-{args.cfg_scale}-seed-{args.global_seed}_register-{args.register}"
+    if args.lsun:
+        folder_name += "-lsun"
+
     sample_folder_dir = f"{args.sample_dir}/{folder_name}"
     if rank == 0:
         os.makedirs(sample_folder_dir, exist_ok=True)
@@ -164,5 +173,6 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt", type=str, default=None,
                         help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
     parser.add_argument("--register", type=int, default=0)
+    parser.add_argument("--lsun", action="store_true", help="Use LSUN dataset instead of ImageNet.")
     args = parser.parse_args()
     main(args)
