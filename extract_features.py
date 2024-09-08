@@ -43,7 +43,7 @@ def update_ema(ema_model, model, decay=0.9999):
     """
     ema_params = OrderedDict(ema_model.named_parameters())
     model_params = OrderedDict(model.named_parameters())
-    
+
     for name, param in model_params.items():
         # TODO: Consider applying only to params that require_grad to avoid small numerical changes of pos_embed
         ema_params[name].mul_(decay).add_(param.data, alpha=1 - decay)
@@ -126,8 +126,12 @@ def main(args):
     # Setup a feature folder:
     if rank == 0:
         os.makedirs(args.features_path, exist_ok=True)
-        os.makedirs(os.path.join(args.features_path, 'imagenet256_features'), exist_ok=True)
-        os.makedirs(os.path.join(args.features_path, 'imagenet256_labels'), exist_ok=True)
+        if args.lsun:
+            os.makedirs(os.path.join(args.features_path, 'lsun_features'), exist_ok=True)
+            os.makedirs(os.path.join(args.features_path, 'lsun_labels'), exist_ok=True)
+        else:
+            os.makedirs(os.path.join(args.features_path, 'imagenet256_features'), exist_ok=True)
+            os.makedirs(os.path.join(args.features_path, 'imagenet256_labels'), exist_ok=True)
 
     # Create model:
     assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
@@ -160,21 +164,28 @@ def main(args):
     )
 
     train_steps = 0
-    for x, y in loader:
+    from tqdm import tqdm
+    for x, y in tqdm(loader):
         x = x.to(device)
         y = y.to(device)
         with torch.no_grad():
             # Map input images to latent space + normalize latents:
             x = vae.encode(x).latent_dist.sample().mul_(0.18215)
-            
+
         x = x.detach().cpu().numpy()    # (1, 4, 32, 32)
-        np.save(f'{args.features_path}/imagenet256_features/{train_steps}.npy', x)
+        if args.lsun:
+            np.save(f'{args.features_path}/lsun_features/{train_steps}.npy', x)
+        else:
+            np.save(f'{args.features_path}/imagenet256_features/{train_steps}.npy', x)
 
         y = y.detach().cpu().numpy()    # (1,)
-        np.save(f'{args.features_path}/imagenet256_labels/{train_steps}.npy', y)
-            
+        if args.lsun:
+            np.save(f'{args.features_path}/lsun_labels/{train_steps}.npy', y)
+        else:
+            np.save(f'{args.features_path}/imagenet256_labels/{train_steps}.npy', y)
+
         train_steps += 1
-        print(train_steps)
+        # print(train_steps)
 
 if __name__ == "__main__":
     # Default args here will train DiT-XL/2 with the hyperparameters we used in our paper (except training iters).
@@ -182,7 +193,7 @@ if __name__ == "__main__":
     parser.add_argument("--data-path", type=str, required=True)
     parser.add_argument("--features-path", type=str, default="features")
     parser.add_argument("--results-dir", type=str, default="results")
-    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
+    # parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--epochs", type=int, default=1400)
@@ -192,5 +203,6 @@ if __name__ == "__main__":
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
+    parser.add_argument("--lsun", action="store_true")
     args = parser.parse_args()
     main(args)
