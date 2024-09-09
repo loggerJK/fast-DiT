@@ -54,6 +54,10 @@ def main(args):
         assert args.image_size in [256, 512]
         assert args.num_classes == 1000
 
+    if args.lsun and args.num_classes != 1:
+        warnings.warn("LSUN only has one class, setting num_classes to 1.")
+        args.num_classes = 1
+
     # Load model:
     latent_size = args.image_size // 8
     model = DiT_models[args.model](
@@ -88,7 +92,7 @@ def main(args):
     # Setup classifier-free guidance:
     if using_cfg:
         z = torch.cat([z, z], 0)
-        y_null = torch.tensor([1000] * n, device=device)
+        y_null = torch.tensor([args.num_classes] * n, device=device)
         y = torch.cat([y, y_null], 0)
         model_kwargs = dict(y=y, cfg_scale=args.cfg_scale)
         sample_fn = model.forward_with_cfg
@@ -105,10 +109,12 @@ def main(args):
     samples = vae.decode(samples / 0.18215).sample
 
     # Save and display images:
-    save_image(samples, "sample.png", nrow=1, normalize=True, value_range=(-1, 1))
+    filename = f"sample_seed{args.seed}.png"
+    save_image(samples, filename, nrow=1, normalize=True, value_range=(-1, 1))
 
     if args.save_attn:
-        torch.save(model.attention_maps_list, "attn_maps.pt")
+        attn_filename = filename + "_attn_maps.pt"
+        torch.save(model.attention_maps_list, attn_filename)
 
 
 if __name__ == "__main__":
