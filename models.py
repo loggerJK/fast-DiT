@@ -196,8 +196,9 @@ class DiT(nn.Module):
         self.register = register
         T = input_size ** 2 // patch_size ** 2
         if self.register:
+            self.register_attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True)
             self.register_token = nn.Parameter(
-                torch.zeros(register, hidden_size), requires_grad=True)
+                torch.nn.init.xavier_normal_(torch.zeros(register, hidden_size)), requires_grad=True)
 
         ### Save Attention Weights ###
         self.save_attn = save_attn
@@ -286,12 +287,17 @@ class DiT(nn.Module):
         y: (N,) tensor of class labels
         """
         x = self.x_embedder(x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2, T is total number of patches(tokens)
-        if self.register :
-            x = torch.cat([x, einops.repeat(self.register_token, 'R D -> N R D', N=x.shape[0] )], dim=1)
         t = self.t_embedder(t)                   # (N, D)
         y = self.y_embedder(y, self.training)    # (N, D)
         c = t + y                                # (N, D)
+        if self.register :
+            x = torch.cat([x, einops.repeat(self.register_token, 'R D -> N R D', N=x.shape[0] )], dim=1)
         for block in self.blocks:
+            # Update register token via attention with context c
+            if self.register:
+                register_token = x[:, -self.register:]
+                register_token = self.register_attn(torch.cat([register_token, c.unsqueeze(1)], dim=1))[:, :self.register]
+                x[:, -self.register:] = register_token
             x = torch.utils.checkpoint.checkpoint(self.ckpt_wrapper(block), x, c)       # (N, T, D)
         x = self.final_layer(x, c)                # (N, T, patch_size ** 2 * out_channels)
         x = self.unpatchify(x)                   # (N, out_channels, H, W)
