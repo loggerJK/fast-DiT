@@ -2,3 +2,4 @@ features/
 results/
 samples
 */*.pyc
+diffusion/__pycache__/
