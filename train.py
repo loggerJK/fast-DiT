@@ -34,6 +34,7 @@ from models import DiT_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
 
+import warnings
 
 
 #################################################################################

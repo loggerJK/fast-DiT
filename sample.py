@@ -109,12 +109,14 @@ def main(args):
     samples = vae.decode(samples / 0.18215).sample
 
     # Save and display images:
+    save_folder = args.save_folder
+    os.makedirs(save_folder, exist_ok=True)
     filename = f"sample_seed{args.seed}.png"
-    save_image(samples, filename, nrow=1, normalize=True, value_range=(-1, 1))
+    save_image(samples, os.path.join(save_folder,filename), nrow=1, normalize=True, value_range=(-1, 1))
 
     if args.save_attn:
         attn_filename = filename + "_attn_maps.pt"
-        torch.save(model.attention_maps_list, attn_filename)
+        torch.save(model.attention_maps_list, os.path.join(save_folder,attn_filename))
 
 
 if __name__ == "__main__":
@@ -131,5 +133,6 @@ if __name__ == "__main__":
     parser.add_argument("--register", type=int, default=0)
     parser.add_argument("--lsun", action="store_true", help="Use LSUN dataset instead of ImageNet.")
     parser.add_argument("--save_attn", action="store_true", help="Save attention maps.")
+    parser.add_argument("--save-folder", type=str, default="./", help="Folder to save samples.")
     args = parser.parse_args()
     main(args)
