@@ -170,7 +170,8 @@ class DiT(nn.Module):
         num_classes=1000,
         learn_sigma=True,
         register=0,
-        save_attn=False
+        save_attn=False,
+        **model_kwargs
     ):
         super().__init__()
         self.learn_sigma = learn_sigma
@@ -205,6 +206,10 @@ class DiT(nn.Module):
         self.attention_maps_list = []
         for block_num, block in enumerate(self.blocks):
             block.attn.register_forward_hook(self.save_attn_func(block_num))
+
+        ### Save Final Layer Patches ###
+        self.save_final_layer_patches = model_kwargs.get('save_final_layer_patches', False)
+        self.final_layer_patches_list = []
 
     def save_attn_func(self, block_num, save_values=False):
         def _save_attn_func(module, input, output):
@@ -300,6 +305,8 @@ class DiT(nn.Module):
                 x[:, -self.register:] = register_token
             x = torch.utils.checkpoint.checkpoint(self.ckpt_wrapper(block), x, c)       # (N, T, D)
         x = self.final_layer(x, c)                # (N, T, patch_size ** 2 * out_channels)
+        if self.save_final_layer_patches:
+            self.final_layer_patches_list.append(x.detach().cpu().numpy())
         x = self.unpatchify(x)                   # (N, out_channels, H, W)
         return x
 

@@ -64,7 +64,8 @@ def main(args):
         input_size=latent_size,
         num_classes=args.num_classes,
         register=args.register,
-        save_attn=args.save_attn
+        save_attn=args.save_attn,
+        save_final_layer_patches=args.save_final_layer_patches
     ).to(device)
     # Auto-download a pre-trained model or load a custom DiT checkpoint from train.py:
     ckpt_path = args.ckpt or f"DiT-XL-2-{args.image_size}x{args.image_size}.pt"
@@ -111,12 +112,17 @@ def main(args):
     # Save and display images:
     save_folder = args.save_folder
     os.makedirs(save_folder, exist_ok=True)
-    filename = f"sample_seed{args.seed}.png"
-    save_image(samples, os.path.join(save_folder,filename), nrow=1, normalize=True, value_range=(-1, 1))
+    filename = f"sample_seed{args.seed}"
+    save_image(samples, os.path.join(save_folder,filename + ".png"), nrow=1, normalize=True, value_range=(-1, 1))
 
     if args.save_attn:
         attn_filename = filename + "_attn_maps.pt"
         torch.save(model.attention_maps_list, os.path.join(save_folder,attn_filename))
+
+    if args.save_final_layer_patches:
+        patches_filename = filename + "_final_layer_patches.pt"
+        print(f"Saving final layer patches to {os.path.join(save_folder,patches_filename)}")
+        torch.save(model.final_layer_patches_list, os.path.join(save_folder,patches_filename))
 
 
 if __name__ == "__main__":
@@ -133,6 +139,7 @@ if __name__ == "__main__":
     parser.add_argument("--register", type=int, default=0)
     parser.add_argument("--lsun", action="store_true", help="Use LSUN dataset instead of ImageNet.")
     parser.add_argument("--save_attn", action="store_true", help="Save attention maps.")
+    parser.add_argument("--save_final-layer-patches", action="store_true", help="Save final layer patches.")
     parser.add_argument("--save-folder", type=str, default="./", help="Folder to save samples.")
     args = parser.parse_args()
     main(args)
