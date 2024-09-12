@@ -49,11 +49,12 @@ class SaveAttention(nn.Module):
 
         attn = get_attn_weight(q, k, v, dropout_p=self.attn_drop.p if self.training else 0.)
         x = attn @ v
+        v_ = v.detach().clone()
 
         x = x.transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
-        return x, attn
+        return x, attn, v_
 
 # Efficient implementation equivalent to the following:
 def get_attn_weight(
