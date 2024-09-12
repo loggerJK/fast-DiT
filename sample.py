@@ -124,6 +124,9 @@ def main(args):
         print(f"Saving final layer patches to {os.path.join(save_folder,patches_filename)}")
         torch.save(model.final_layer_patches_list, os.path.join(save_folder,patches_filename))
 
+    if args.save_values:
+        values_filename = filename + "_values.pt"
+        torch.save(model.values_list, os.path.join(save_folder,values_filename))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -141,5 +144,6 @@ if __name__ == "__main__":
     parser.add_argument("--save_attn", action="store_true", help="Save attention maps.")
     parser.add_argument("--save_final-layer-patches", action="store_true", help="Save final layer patches.")
     parser.add_argument("--save-folder", type=str, default="./", help="Folder to save samples.")
+    parser.add_argument("--save-values", action="store_true", help="Save values.")
     args = parser.parse_args()
     main(args)

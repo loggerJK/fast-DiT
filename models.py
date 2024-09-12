@@ -203,8 +203,9 @@ class DiT(nn.Module):
         ### Save Attention Weights ###
         self.save_attn = save_attn
         self.attention_maps_list = []
+        self.values_list = []
         for block_num, block in enumerate(self.blocks):
-            block.attn.register_forward_hook(self.save_attn_func(block_num))
+            block.attn.register_forward_hook(self.save_attn_func(block_num, save_values=True))
 
         ### Save Final Layer Patches ###
         self.save_final_layer_patches = model_kwargs.get('save_final_layer_patches', False)
@@ -213,11 +214,16 @@ class DiT(nn.Module):
     def save_attn_func(self, block_num, save_values=False):
         def _save_attn_func(module, input, output):
             if self.save_attn:
-                attn_weight = output[-1]
+                attn_weight = output[-2]
                 attn_weight = (
                     torch.mean(attn_weight, dim=1)[0].detach().cpu().numpy()
                 )  # Average over heads, torch.Size([1, 12, 4096, 4360])
                 self.attention_maps_list.append((block_num, attn_weight))
+
+                if save_values:
+                    values = output[-1]
+                    values = values[0].cpu().numpy()
+                    self.values_list.append((block_num, values))
 
             return output[0]
 
