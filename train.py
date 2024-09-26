@@ -151,7 +151,7 @@ def main(args):
         # e.g., DiT-XL/2 --> DiT-XL-2 (for naming folders)
         model_string_name = args.model.replace("/", "-")
         # experiment_dir = f"{args.results_dir}/{experiment_index:03d}-{model_string_name}"  # Create an experiment folder
-        experiment_dir = f"{args.results_dir}/{model_string_name}_register{args.register}"
+        experiment_dir = f"{args.results_dir}/{model_string_name}_v2register{args.register}"
         if args.lsun: experiment_dir += "_lsun"
         # Stores saved model checkpoints
         if args.test : experiment_dir = f"{args.results_dir}/test"

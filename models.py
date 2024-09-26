@@ -14,7 +14,7 @@ import torch.nn as nn
 import numpy as np
 import math
 from timm.models.vision_transformer import PatchEmbed, Attention, Mlp
-from custom_attention import SaveAttention, CustomAttention
+from custom_attention import SaveAttention, NoRegisterAttention, CustomAttention
 import einops
 
 
@@ -198,9 +198,25 @@ class DiT(nn.Module):
         self.register = register
         T = input_size ** 2 // patch_size ** 2
         if self.register:
-            self.register_attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True)
+            self.register_attn_blocks = nn.ModuleList([
+                Attention(hidden_size, num_heads=num_heads, qkv_bias=True) for _ in range(2)
+            ])
+            self.register_norm_blocks = nn.ModuleList([
+                nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6) for _ in range(2)
+            ])
             self.register_token = nn.Parameter(
                 torch.nn.init.xavier_normal_(torch.zeros(register, hidden_size)), requires_grad=True)
+
+
+        ### Save Final Layer Patches ###
+        self.save_final_layer_patches = model_kwargs.get('save_final_layer_patches', False)
+        self.final_layer_patches_list = []
+
+        ### No Register Attention ###
+        self.no_register_attn = model_kwargs.get('no_register_attn', False)
+        if self.no_register_attn:
+            for block in self.blocks:
+                block.attn = NoRegisterAttention(hidden_size, num_heads=num_heads, qkv_bias=True)
 
         ### Save Attention Weights ###
         self.save_attn = save_attn
@@ -208,10 +224,6 @@ class DiT(nn.Module):
         self.values_list = []
         for block_num, block in enumerate(self.blocks):
             block.attn.register_forward_hook(self.save_attn_func(block_num, save_values=True))
-
-        ### Save Final Layer Patches ###
-        self.save_final_layer_patches = model_kwargs.get('save_final_layer_patches', False)
-        self.final_layer_patches_list = []
 
     def save_attn_func(self, block_num, save_values=False):
         def _save_attn_func(module, input, output):
@@ -303,12 +315,18 @@ class DiT(nn.Module):
         y = self.y_embedder(y, self.training)    # (N, D)
         c = t + y                                # (N, D)
         if self.register :
-            x = torch.cat([x, einops.repeat(self.register_token, 'R D -> N R D', N=x.shape[0] )], dim=1)
-        for block in self.blocks:
+            x = torch.cat([x, einops.repeat(self.register_token, 'T D -> N T D', N=x.shape[0] )], dim=1)
+        for block_i, block in enumerate(self.blocks):
             # Update register token via attention with context c
-            if self.register:
+            if self.register and block_i == 0:
                 register_token = x[:, -self.register:]
-                register_token = self.register_attn(torch.cat([register_token, c.unsqueeze(1)], dim=1))[:, :self.register]
+
+                for attn_block, norm_block in zip(self.register_attn_blocks, self.register_norm_blocks):
+                    residual = register_token
+                    register_token = residual + attn_block(
+                        norm_block(torch.cat([register_token, x, c.unsqueeze(1)], dim=1))
+                    )[:, :self.register]
+
                 x[:, -self.register:] = register_token
             x = torch.utils.checkpoint.checkpoint(self.ckpt_wrapper(block), x, c)       # (N, T, D)
         x = self.final_layer(x, c)                # (N, T, patch_size ** 2 * out_channels)
@@ -440,5 +458,6 @@ DiT_models = {
     'DiT-L/2':  DiT_L_2,   'DiT-L/4':  DiT_L_4,   'DiT-L/8':  DiT_L_8,
     'DiT-B/2':  DiT_B_2,   'DiT-B/4':  DiT_B_4,   'DiT-B/8':  DiT_B_8,
     'DiT-S/2':  DiT_S_2,   'DiT-S/4':  DiT_S_4,   'DiT-S/8':  DiT_S_8,
+    'DiT-C/2':  DiT_C_2,
     'DiT-C/2':  DiT_C_2,
 }

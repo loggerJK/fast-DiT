@@ -65,7 +65,8 @@ def main(args):
         num_classes=args.num_classes,
         register=args.register,
         save_attn=args.save_attn,
-        save_final_layer_patches=args.save_final_layer_patches
+        save_final_layer_patches=args.save_final_layer_patches,
+        no_register_attn=args.no_register_attn
     ).to(device)
     # Auto-download a pre-trained model or load a custom DiT checkpoint from train.py:
     ckpt_path = args.ckpt or f"DiT-XL-2-{args.image_size}x{args.image_size}.pt"
@@ -113,6 +114,9 @@ def main(args):
     save_folder = args.save_folder
     os.makedirs(save_folder, exist_ok=True)
     filename = f"sample_seed{args.seed}"
+    if args.no_register_attn:
+        filename += "_no_reg_attn"
+
     save_image(samples, os.path.join(save_folder,filename + ".png"), nrow=1, normalize=True, value_range=(-1, 1))
 
     if args.save_attn:
@@ -145,5 +149,6 @@ if __name__ == "__main__":
     parser.add_argument("--save_final-layer-patches", action="store_true", help="Save final layer patches.")
     parser.add_argument("--save-folder", type=str, default="./", help="Folder to save samples.")
     parser.add_argument("--save-values", action="store_true", help="Save values.")
+    parser.add_argument("--no-register-attn", action="store_true", help="No register attention.")
     args = parser.parse_args()
     main(args)
