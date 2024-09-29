@@ -126,11 +126,24 @@ class DiTBlock(nn.Module):
         #         nn.Linear(hidden_size, 6 * hidden_size + self.register, bias=True)
         #     )
 
+        ### Zero Token ###
+        self.zero_token = block_kwargs.get('zero_token', False)
+        if self.zero_token:
+            print(f"Applying zero token to {self.zero_token}")
+
     def forward(self, x, c):
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=1)
-        # x.shape : torch.Size([256, 264, 768])
-        x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
-        x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
+        x_ = self.norm1(x) # (N, T, D) (1, 256, 1152)
+        # if self.zero_token:
+        #     x_[:, :, self.zero_token] = 0
+        x = x + gate_msa.unsqueeze(1) * self.attn(modulate((x_), shift_msa, scale_msa))
+        x_ = self.norm2(x)
+        # if self.zero_token:
+        #     x_[:, :, self.zero_token] = 0
+        x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate((x_), shift_mlp, scale_mlp))
+        if self.zero_token:
+            trg_token = torch.argmin(x, dim=2) # (N, T)
+            x[range(x.shape[0]), range(x.shape[1]), trg_token] = torch.mean(x, dim=2)
         return x
 
 
@@ -181,6 +194,11 @@ class DiT(nn.Module):
         self.patch_size = patch_size
         self.num_heads = num_heads
 
+        ### Zero Token ###
+        self.zero_token = model_kwargs.get('zero_token', False)
+        if self.zero_token:
+            print(f"Applying zero token to {self.zero_token}")
+
         self.x_embedder = PatchEmbed(input_size, patch_size, in_channels, hidden_size, bias=True)
         self.t_embedder = TimestepEmbedder(hidden_size)
         self.y_embedder = LabelEmbedder(num_classes, hidden_size, class_dropout_prob)
@@ -189,7 +207,7 @@ class DiT(nn.Module):
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, hidden_size), requires_grad=False)
 
         self.blocks = nn.ModuleList([
-            DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio, register=register, save_attn = save_attn) for _ in range(depth)
+            DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio, register=register, save_attn = save_attn, zero_token = self.zero_token) for _ in range(depth)
         ])
         self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
         self.initialize_weights()
@@ -204,28 +222,56 @@ class DiT(nn.Module):
         ### Save Attention Weights ###
         self.save_attn = save_attn
         self.attention_maps_list = []
+        self.query_list = []
         self.values_list = []
+        self.key_list = []
         for block_num, block in enumerate(self.blocks):
-            block.attn.register_forward_hook(self.save_attn_func(block_num, save_values=True))
+            block.attn.register_forward_hook(self.save_attn_func(block_num, save_query= True, save_key=True, save_values=True))
 
         ### Save Final Layer Patches ###
         self.save_final_layer_patches = model_kwargs.get('save_final_layer_patches', False)
         self.final_layer_patches_list = []
 
-    def save_attn_func(self, block_num, save_values=False):
+        ### Save Activation ###
+        self.save_activation = model_kwargs.get('save_activation', False)
+        self.activations_list = []
+        print((f"Save Activation: {self.save_activation}"))
+        for block_num, block in enumerate(self.blocks):
+            block.register_forward_hook(self.save_activation_func(block_num))
+
+
+
+    def save_activation_func(self, block_num):
+        def _save_activation_func(module, input, output):
+            if self.save_activation:
+                self.activations_list.append((block_num, output.detach().cpu().numpy()))
+                print(f"Block {block_num} output shape: {output.shape}")
+            return output
+        return _save_activation_func
+
+    def save_attn_func(self, block_num, save_query=False, save_values=False, save_key=False):
         def _save_attn_func(module, input, output):
             if self.save_attn:
-                attn_weight = output[-2]
+                attn_weight = output[1]
                 attn_weight = (
                     torch.mean(attn_weight, dim=1)[0].detach().cpu().numpy()
                 )  # Average over heads, torch.Size([1, 12, 4096, 4360])
                 self.attention_maps_list.append((block_num, attn_weight))
 
+                if save_query:
+                    query = output[2]
+                    query = query[0].cpu().numpy()
+                    self.query_list.append((block_num, query))
+
+                if save_key:
+                    key = output[3]
+                    key = key[0].cpu().numpy()
+                    self.key_list.append((block_num, key))
+
                 if save_values:
-                    values = output[-1]
+                    values = output[4]
                     values = values[0].cpu().numpy()
                     self.values_list.append((block_num, values))
-
             return output[0]
 
         return _save_attn_func
@@ -305,6 +351,9 @@ class DiT(nn.Module):
         c = t + y                                # (N, D)
         for block in self.blocks:
             x = torch.utils.checkpoint.checkpoint(self.ckpt_wrapper(block), x, c)       # (N, T, D)
+        # if self.zero_token:
+        #     print(f"Zero token applied to {self.zero_token}")
+        #     x[:, :, self.zero_token] = 0
         x = self.final_layer(x, c)                # (N, T, patch_size ** 2 * out_channels)
         if self.save_final_layer_patches:
             self.final_layer_patches_list.append(x.detach().cpu().numpy())

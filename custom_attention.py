@@ -38,6 +38,8 @@ class CustomAttention(nn.Module):
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv.unbind(0)
+        q_ = q.detach().clone()
+        k_ = k.detach().clone()
         q, k = self.q_norm(q), self.k_norm(k)
 
         if not self.save_attn:
@@ -65,7 +67,7 @@ class CustomAttention(nn.Module):
             x = x.transpose(1, 2).reshape(B, N, C)
             x = self.proj(x)
             x = self.proj_drop(x)
-            return x, attn, v_
+            return x, attn, q_, k_, v_
 class SaveAttention(nn.Module):
 
     def __init__(
@@ -112,11 +114,13 @@ class SaveAttention(nn.Module):
         attn = get_attn_weight(q, k, v, dropout_p=self.attn_drop.p if self.training else 0.)
         x = attn @ v
         v_ = v.detach().clone()
+        q_ = q.detach().clone()
+        k_ = k.detach().clone()
 
         x = x.transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
-        return x, attn, v_
+        return x, attn, q_, k_, v_
 
 # Efficient implementation equivalent to the following:
 def get_attn_weight(

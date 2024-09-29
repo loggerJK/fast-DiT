@@ -42,7 +42,7 @@ def enable_full_determinism():
     np.random.seed(0)
 
 def main(args):
-    enable_full_determinism()
+    # enable_full_determinism()
     using_cfg = args.cfg_scale > 1.0
     # Setup PyTorch:
     torch.manual_seed(args.seed)
@@ -65,7 +65,9 @@ def main(args):
         num_classes=args.num_classes,
         register=args.register,
         save_attn=args.save_attn,
-        save_final_layer_patches=args.save_final_layer_patches
+        save_final_layer_patches=args.save_final_layer_patches,
+        save_activation=args.save_activation,
+        zero_token=args.zero_token
     ).to(device)
     # Auto-download a pre-trained model or load a custom DiT checkpoint from train.py:
     ckpt_path = args.ckpt or f"DiT-XL-2-{args.image_size}x{args.image_size}.pt"
@@ -113,6 +115,10 @@ def main(args):
     save_folder = args.save_folder
     os.makedirs(save_folder, exist_ok=True)
     filename = f"sample_seed{args.seed}"
+    if args.zero_token > 0:
+        filename += f"_zero_token{args.zero_token}"
+    if args.add_filename:
+        filename += f"_{args.add_filename}"
     save_image(samples, os.path.join(save_folder,filename + ".png"), nrow=1, normalize=True, value_range=(-1, 1))
 
     if args.save_attn:
@@ -127,6 +133,18 @@ def main(args):
     if args.save_values:
         values_filename = filename + "_values.pt"
         torch.save(model.values_list, os.path.join(save_folder,values_filename))
+
+    if args.save_key:
+        key_filename = filename + "_key.pt"
+        torch.save(model.key_list, os.path.join(save_folder,key_filename))
+
+    if args.save_query:
+        query_filename = filename + "_query.pt"
+        torch.save(model.query_list, os.path.join(save_folder,query_filename))
+
+    if args.save_activation:
+        activations_filename = filename + "_activation.pt"
+        torch.save(model.activations_list, os.path.join(save_folder,activations_filename))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -145,5 +163,10 @@ if __name__ == "__main__":
     parser.add_argument("--save_final-layer-patches", action="store_true", help="Save final layer patches.")
     parser.add_argument("--save-folder", type=str, default="./", help="Folder to save samples.")
     parser.add_argument("--save-values", action="store_true", help="Save values.")
+    parser.add_argument("--save-key", action="store_true", help="Save key.")
+    parser.add_argument("--save-query", action="store_true", help="Save query.")
+    parser.add_argument("--save-activation", action="store_true", help="Save activations.")
+    parser.add_argument("--zero-token", default=0, type=int, help="Zero token for the model. Applied if > 0")
+    parser.add_argument("--add-filename", default="", type=str, help="Add a string to the filename.")
     args = parser.parse_args()
     main(args)
